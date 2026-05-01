@@ -142,29 +142,51 @@ class TSCrawler:
     def collect_entries(self):
         feedparser.USER_AGENT = USER_AGENT
         new_entries = []
-        fallback_entries = []
+        fallback_filter = []   # 필터 통과 + history 있음
+        fallback_all = []      # 필터 무관 + history 있음 (최후 보충용)
+        seen_titles = set()    # 제목 중복 체크용
 
         for url in FEED_SOURCES:
             feed = feedparser.parse(url)
             logger.info(f"[RSS] {url} → {len(feed.entries)}개")
             for e in feed.entries:
+                # 제목 중복 체크
+                title_key = e.title.strip()[:50]
+                if title_key in seen_titles:
+                    logger.info(f"제목 중복 스킵: {title_key}")
+                    continue
+                seen_titles.add(title_key)
+
                 passes_filter = (
                     "senjutsu.jp" in url or contains_keyword(e.title)
                 )
-                if not passes_filter:
-                    continue
                 if e.link not in self.posted_articles:
-                    new_entries.append(e)
+                    if passes_filter:
+                        new_entries.append(e)
                 else:
-                    fallback_entries.append(e)
+                    if passes_filter:
+                        fallback_filter.append(e)
+                    else:
+                        fallback_all.append(e)
 
         articles = new_entries[:MAX_ARTICLES]
 
-        # 5개 미달 시 과거 기사로 보충 (Supabase에 없는 것만)
+        # 1차 보충: 필터 통과 과거 기사
         if len(articles) < MAX_ARTICLES:
             needed = MAX_ARTICLES - len(articles)
-            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사로 보충")
-            for e in fallback_entries:
+            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사(필터 통과)로 보충")
+            for e in fallback_filter:
+                if needed <= 0:
+                    break
+                if not self.is_in_supabase(e.link):
+                    articles.append(e)
+                    needed -= 1
+
+        # 2차 보충: 필터 무관 RSS 전체
+        if len(articles) < MAX_ARTICLES:
+            needed = MAX_ARTICLES - len(articles)
+            logger.info(f"여전히 {needed}개 부족 → RSS 전체로 보충")
+            for e in fallback_all:
                 if needed <= 0:
                     break
                 if not self.is_in_supabase(e.link):
