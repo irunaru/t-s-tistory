@@ -11,6 +11,7 @@ import feedparser
 import logging
 import requests
 import re
+import time
 from bs4 import BeautifulSoup
 from datetime import datetime, date
 from typing import Dict, Optional
@@ -163,6 +164,8 @@ class TSCrawler:
                 if e.link not in self.posted_articles:
                     if passes_filter:
                         new_entries.append(e)
+                    else:
+                        fallback_all.append(e)  # 필터 미통과 새 기사도 최후 보충용으로
                 else:
                     if passes_filter:
                         fallback_filter.append(e)
@@ -312,7 +315,8 @@ class TSCrawler:
             f"[CONTENT]{content}"
         )
         try:
-            logger.info("2차 검수 중...")
+            logger.info("2차 검수 중... (7초 대기)")
+            time.sleep(7)  # 분당 10회 한도 방지
             response = self.model.generate_content(review_prompt)
             raw = response.text
 
