@@ -31,15 +31,22 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 
 FEED_SOURCES = [
     "https://coinpost.jp/?feed=rss2",
+    "https://bitcoinmagazine.com/feed",        # 비트코인 매거진 (영문)
+    "https://cryptonews.com/news/feed/",       # 크립토뉴스 (영문)
     "https://nakaoka-inc.com/staffblog/feed/",
     "https://senjutsu.jp/feed/",
 ]
 
 KEYWORDS = [
+    # 일본어
     "ビットコイン", "BTC", "仮想通貨", "暗号資産", "ETF", "ステーブルコイン",
     "金", "ゴールド", "資産", "投資", "相場", "価格", "上昇", "下落",
     "四柱推命", "占い", "運勢", "運気", "風水", "五行", "オーラ",
     "紫微斗数", "周易", "奇門遁甲", "宿命", "運命", "タイミング",
+    # 영문
+    "Bitcoin", "BTC", "Ethereum", "ETH", "crypto", "Crypto",
+    "gold", "Gold", "investment", "Investment", "ETF", "stablecoin",
+    "price", "Price", "market", "Market",
 ]
 
 MAX_ARTICLES = 5
@@ -51,6 +58,8 @@ HISTORY_FILE = "posted_articles_ts.json"
 # -------------------------------------------------------------------------
 SOURCE_MAP = {
     "coinpost.jp": "coin",
+    "bitcoinmagazine.com": "coin",
+    "cryptonews.com": "coin",
     "nakaoka-inc.com": "gold",
     "senjutsu.jp": "fortune",
 }
@@ -82,6 +91,17 @@ def remove_copyright(html: str) -> str:
 def contains_keyword(title: str) -> bool:
     return any(kw in title for kw in KEYWORDS)
 
+# 한국 독자와 무관한 일본 로컬 기사 제외
+EXCLUDE_KEYWORDS = [
+    "天皇", "皇室", "王室", "皇族", "御所", "宮内庁", "陛下", "殿下",
+    "大河", "NHK", "参議院", "衆議院", "国会", "内閣", "首相",
+    "戦国", "江戸", "明治", "昭和", "平成",
+    "パチンコ", "競馬", "宝くじ",  # 도박 관련
+]
+
+def is_excluded(title: str) -> bool:
+    return any(kw in title for kw in EXCLUDE_KEYWORDS)
+
 
 class TSCrawler:
     def __init__(self):
@@ -108,9 +128,9 @@ class TSCrawler:
     def collect_entries(self):
         feedparser.USER_AGENT = USER_AGENT
         new_entries = []
-        fallback_filter = []   # 필터 통과 + history 있음
-        fallback_all = []      # 필터 무관 + history 있음 (최후 보충용)
-        seen_titles = set()    # 제목 중복 체크용
+        fallback_filter = []
+        fallback_all = []
+        seen_titles = set()
 
         for url in FEED_SOURCES:
             feed = feedparser.parse(url)
@@ -123,14 +143,22 @@ class TSCrawler:
                     continue
                 seen_titles.add(title_key)
 
+                # 일본 로컬 기사 제외
+                if is_excluded(e.title):
+                    logger.info(f"제외 키워드 스킵: {e.title[:40]}")
+                    continue
+
                 passes_filter = (
-                    "senjutsu.jp" in url or contains_keyword(e.title)
+                    "senjutsu.jp" in url or
+                    "bitcoinmagazine.com" in url or
+                    "cryptonews.com" in url or
+                    contains_keyword(e.title)
                 )
                 if e.link not in self.posted_articles:
                     if passes_filter:
                         new_entries.append(e)
                     else:
-                        fallback_all.append(e)  # 필터 미통과 새 기사도 최후 보충용으로
+                        fallback_all.append(e)
                 else:
                     if passes_filter:
                         fallback_filter.append(e)
@@ -195,10 +223,11 @@ class TSCrawler:
                 "이 글은 '운세테크' 블로그용입니다. 가상화폐/BTC 뉴스를 다루되,\n"
                 "논리적 분석보다 '지금 사야 할까, 말아야 할까?' 직관적 판단 중심으로 재구성하세요.\n"
                 "한국화 규칙:\n"
-                "- 제목과 본문에 일본 기업명/고유명사를 절대 사용하지 말 것\n"
-                "- 일본 거래소(bitFlyer, GMOコイン, JPYC 등) → '국내 거래소', '한 스테이블코인 프로젝트' 등으로 익명화\n"
-                "- 일본 회사/프로젝트명 → '한 글로벌 기업', '한 투자사' 식으로 일반화\n"
-                "- 엔화(円) → 달러($) 기준으로 환산해서 설명"
+                "- 제목과 본문에 일본/해외 거래소명, 기업명을 절대 사용하지 말 것\n"
+                "- 거래소명 → '국내 주요 거래소', '글로벌 거래소' 등으로 익명화\n"
+                "- 해외 기업/프로젝트명 → '한 글로벌 기업', '한 투자사' 식으로 일반화\n"
+                "- 엔화(円)/달러($) 기준으로 환산해서 설명\n"
+                "- 영문 원문인 경우 자연스러운 한국어로 완전히 재작성할 것"
             )
         elif source == "gold":
             tone = (
@@ -335,6 +364,11 @@ class TSCrawler:
         saved = 0
         for entry in entries:
             logger.info(f"▶ {entry.title[:50]}")
+
+            # 번역 전 Supabase 중복 체크 (토큰 낭비 방지)
+            if self.is_in_supabase(entry.link):
+                logger.info(f"이미 저장됨 (스킵): {entry.link}")
+                continue
 
             data = self.fetch_article(entry.link)
             if not data:
