@@ -2,7 +2,7 @@
 ts_crawler.py
 GitHub Actions 전용: coinpost.jp + nakaoka-inc.com + senjutsu.jp RSS 크롤링 → Gemini 번역 → Supabase 저장
 대상 사이트: t-s.co.kr (roxic.tistory.com)
-콘셉트: 운세테크 — 투자 타이밍 + 오행/사주 결합
+콘셉트: 운세테크 — 투자 타이밍 + 코인/금/점술 정보
 """
 
 import os
@@ -13,7 +13,7 @@ import requests
 import re
 import time
 from bs4 import BeautifulSoup
-from datetime import datetime, date
+from datetime import datetime
 from typing import Dict, Optional
 from dotenv import load_dotenv
 from supabase import create_client
@@ -45,39 +45,6 @@ KEYWORDS = [
 MAX_ARTICLES = 5
 TABLE_NAME = "ts_articles"
 HISTORY_FILE = "posted_articles_ts.json"
-
-# -------------------------------------------------------------------------
-# 오늘의 일주(日柱) 계산 — 뭉개기용 오행 표현
-# -------------------------------------------------------------------------
-GANJJI = [
-    "갑자","을축","병인","정묘","무진","기사","경오","신미","임신","계유",
-    "갑술","을해","병자","정축","무인","기묘","경진","신사","임오","계미",
-    "갑신","을유","병술","정해","무자","기축","경인","신묘","임진","계사",
-    "갑오","을미","병신","정유","무술","기해","경자","신축","임인","계묘",
-    "갑진","을사","병오","정미","무신","기유","경술","신해","임자","계축",
-    "갑인","을묘","병진","정사","무오","기미","경신","신유","임술","계해",
-]
-GANJI_OHAENG = {
-    "갑":"목(木)","을":"목(木)","병":"화(火)","정":"화(火)",
-    "무":"토(土)","기":"토(土)","경":"금(金)","신":"금(金)",
-    "임":"수(水)","계":"수(水)"
-}
-OHAENG_DESC = {
-    "목(木)": "성장과 확장의",
-    "화(火)": "열기와 상승의",
-    "토(土)": "안정과 전환의",
-    "금(金)": "수확과 결실의",
-    "수(水)": "흐름과 순환의",
-}
-
-def get_ohaeng_context() -> str:
-    today = date.today()
-    base = date(2024, 1, 1)
-    idx = (today - base).days % 60
-    ganji = GANJJI[idx]
-    ohaeng = GANJI_OHAENG[ganji[0]]
-    desc = OHAENG_DESC[ohaeng]
-    return f"{ohaeng}이 {desc} 기운을 띠는 요즘"
 
 # -------------------------------------------------------------------------
 # 소스 판별
@@ -121,8 +88,6 @@ class TSCrawler:
         self.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         genai.configure(api_key=GEMINI_API_KEY)
         self.model = genai.GenerativeModel(GEMINI_MODEL)
-        self.ohaeng_context = get_ohaeng_context()
-        logger.info(f"오행 맥락: {self.ohaeng_context}")
 
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
@@ -256,21 +221,23 @@ class TSCrawler:
             )
 
         prompt = (
-            f"{self.ohaeng_context}, 이 기운을 콘텐츠에 자연스럽게 녹여서 "
-            f"'왜 지금 이 투자/운세 주제가 중요한가'의 맥락을 만드세요.\n"
-            "특정 날짜를 언급하지 말고, 오행의 흐름으로만 표현하세요.\n\n"
+            "다음 일본어 기사를 한국어 블로그 포스팅으로 충실하게 번역하세요.\n"
+            "이 글은 가상화폐/금 투자 및 운세 블로그의 원고 소재로 사용됩니다.\n\n"
+            "【핵심 원칙】\n"
+            "원문의 내용, 사실, 수치, 사건을 100% 빠짐없이 전달하는 것이 최우선입니다.\n"
+            "오행, 운세 관련 내용은 일절 추가하지 마세요.\n\n"
             f"{tone}\n\n"
             "아래 규칙을 반드시 지켜서 작성하세요:\n"
-            "1. 친근한 존댓말로 작성할 것.\n"
-            "2. 제목에 검색 키워드를 자연스럽게 포함할 것 (SEO 최적화).\n"
-            "3. 제목에 일본 기업명/고유명사가 절대 들어가지 않도록 할 것.\n"
-            "4. 도입부 첫 2문장은 질문형 또는 공감형으로 독자를 잡을 것.\n"
-            "5. h2 소제목을 2~3개 포함할 것.\n"
-            "6. 글자수 800자 이상으로 작성할 것.\n"
-            "7. 글 마지막에 한 줄 결론을 추가할 것 (예: '→ 지금은 관망, 다음 주 진입 고려').\n"
-            "8. 저자 이름, 저작권 표시(©, (C), ※), 출처 표기 모두 제거.\n"
-            "9. img 태그는 절대 포함하지 말 것.\n"
-            "10. 상투적인 반복 문구 금지. 기사마다 신선한 표현 사용.\n\n"
+            "1. 원문의 모든 핵심 정보, 수치, 사건을 충실하게 전달할 것.\n"
+            "2. 친근한 존댓말로 자연스러운 한국어로 작성할 것.\n"
+            "3. 제목에 원문의 핵심 키워드를 포함할 것.\n"
+            "4. 제목에 일본 기업명/고유명사가 절대 들어가지 않도록 할 것.\n"
+            "5. 도입부 첫 2문장은 질문형 또는 공감형으로 독자를 잡을 것.\n"
+            "6. h2 소제목을 2~3개 포함할 것.\n"
+            "7. 글자수 800자 이상으로 작성할 것.\n"
+            "8. 글 마지막에 한 줄 결론을 추가할 것 (예: '→ 지금은 관망, 다음 주 진입 고려').\n"
+            "9. 저자 이름, 저작권 표시(©, (C), ※), 출처 표기 모두 제거.\n"
+            "10. img 태그는 절대 포함하지 말 것.\n\n"
             "반드시 아래 형식으로만 답하세요 (다른 설명 없이):\n"
             "[TITLE]한국어 제목 (한 줄, 태그 없이 텍스트만)\n"
             "[CONTENT]<p>도입부</p><h2>소제목</h2><p>본문 HTML 내용</p>\n\n"
