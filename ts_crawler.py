@@ -127,25 +127,22 @@ class TSCrawler:
 
     def collect_entries(self):
         feedparser.USER_AGENT = USER_AGENT
-        new_entries = []
-        fallback_filter = []
-        fallback_all = []
         seen_titles = set()
 
+        # 소스별로 새 기사 수집
+        source_entries = {}  # url → [entries]
         for url in FEED_SOURCES:
             feed = feedparser.parse(url)
             logger.info(f"[RSS] {url} → {len(feed.entries)}개")
+            entries = []
             for e in feed.entries:
-                # 제목 중복 체크
                 title_key = e.title.strip()[:50]
                 if title_key in seen_titles:
-                    logger.info(f"제목 중복 스킵: {title_key}")
                     continue
                 seen_titles.add(title_key)
 
-                # 일본 로컬 기사 제외
                 if is_excluded(e.title):
-                    logger.info(f"제외 키워드 스킵: {e.title[:40]}")
+                    logger.info(f"제외 스킵: {e.title[:40]}")
                     continue
 
                 passes_filter = (
@@ -154,40 +151,57 @@ class TSCrawler:
                     "cryptonews.com" in url or
                     contains_keyword(e.title)
                 )
+                if not passes_filter:
+                    continue
+
                 if e.link not in self.posted_articles:
-                    if passes_filter:
-                        new_entries.append(e)
-                    else:
-                        fallback_all.append(e)
-                else:
-                    if passes_filter:
-                        fallback_filter.append(e)
-                    else:
-                        fallback_all.append(e)
+                    entries.append(e)
 
-        articles = new_entries[:MAX_ARTICLES]
+            source_entries[url] = entries
 
-        # 1차 보충: 필터 통과 과거 기사
+        # 소스별 균등 분배 (라운드로빈)
+        new_entries = []
+        max_per_source = max(1, MAX_ARTICLES // len(FEED_SOURCES) + 1)
+        # 각 소스에서 최대 2개씩 우선 수집
+        for url, entries in source_entries.items():
+            new_entries.extend(entries[:2])
+
+        # 중복 제거 후 5개 맞추기
+        seen = set()
+        deduped = []
+        for e in new_entries:
+            if e.link not in seen:
+                seen.add(e.link)
+                deduped.append(e)
+
+        articles = deduped[:MAX_ARTICLES]
+
+        # 5개 미달 시: 각 소스에서 추가 수집
+        if len(articles) < MAX_ARTICLES:
+            for url, entries in source_entries.items():
+                for e in entries[2:]:  # 이미 2개씩 가져간 것 이후
+                    if len(articles) >= MAX_ARTICLES:
+                        break
+                    if e.link not in seen:
+                        seen.add(e.link)
+                        articles.append(e)
+                if len(articles) >= MAX_ARTICLES:
+                    break
+
+        # 여전히 미달 시: fallback (과거 기사 중 Supabase 미저장)
         if len(articles) < MAX_ARTICLES:
             needed = MAX_ARTICLES - len(articles)
-            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사(필터 통과)로 보충")
-            for e in fallback_filter:
-                if needed <= 0:
-                    break
-                if not self.is_in_supabase(e.link):
-                    articles.append(e)
-                    needed -= 1
-
-        # 2차 보충: 필터 무관 RSS 전체
-        if len(articles) < MAX_ARTICLES:
-            needed = MAX_ARTICLES - len(articles)
-            logger.info(f"여전히 {needed}개 부족 → RSS 전체로 보충")
-            for e in fallback_all:
-                if needed <= 0:
-                    break
-                if not self.is_in_supabase(e.link):
-                    articles.append(e)
-                    needed -= 1
+            logger.info(f"새 기사 {len(articles)}개 → {needed}개 과거 기사로 보충")
+            for url in FEED_SOURCES:
+                feed = feedparser.parse(url)
+                for e in feed.entries:
+                    if needed <= 0:
+                        break
+                    if e.link in self.posted_articles and e.link not in seen:
+                        if not self.is_in_supabase(e.link):
+                            seen.add(e.link)
+                            articles.append(e)
+                            needed -= 1
 
         logger.info(f"최종 수집: {len(articles)}개")
         return articles
