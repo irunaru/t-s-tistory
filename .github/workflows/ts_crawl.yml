@@ -1,0 +1,35 @@
+name: TS Crawler
+on:
+  schedule:
+    - cron: '0 21 * * *'  # KST 06:00 매일
+  workflow_dispatch:
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Restore history
+        uses: actions/cache@v4
+        with:
+          path: posted_articles_ts.json
+          key: ts-history-${{ runner.os }}
+          restore-keys: ts-history-
+      - name: Run crawler
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python ts_crawler.py
+      - name: Save history
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: posted_articles_ts.json
+          key: ts-history-${{ runner.os }}
