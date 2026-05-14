@@ -9,27 +9,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Restore history
-        uses: actions/cache@v4
-        with:
-          path: posted_articles_ts.json
-          key: ts-history-${{ runner.os }}
-          restore-keys: ts-history-
+
       - name: Run crawler
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python ts_crawler.py
-      - name: Save history
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: posted_articles_ts.json
-          key: ts-history-${{ runner.os }}
+
+      - name: Save history to repo
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add posted_articles_ts.json
+          git diff --cached --quiet || git commit -m "update ts history [skip ci]"
+          git push
