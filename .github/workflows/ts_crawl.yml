@@ -29,6 +29,6 @@ jobs:
         run: |
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
-          git add posted_articles_ts.json
+          git add posted_articles_ts.json || true
           git diff --cached --quiet || git commit -m "update ts history [skip ci]"
-          git push
+          git push || true
